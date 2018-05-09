@@ -18,3 +18,11 @@ with a key for the google maps api
 ```
 GOOGLE_KEY=zSQY...
 ```
+
+## usage
+
+```
+node . addresses.txt > directions.html
+```
+
+
