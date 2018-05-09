@@ -14,89 +14,53 @@
 
 var fs = require('fs')
 var request = require('request-promise')
-var debug = require('debug')('directions-cli')
+var html = require('nanohtml')
 
 const constants = require('./constants')
-
-debug(constants)
 
 main(process.argv.slice(2))
 
 async function main (args) {
   var filepath = args[0]
-  debug(filepath)
   var addresses = fs.readFileSync(filepath, 'utf8').split('\n')
-  debug('addresses', addresses)
 
-  var places = await Promise.all(addresses.map(addr => geocode(addr)))
-  debug('places', places)
-  var route = await getOptimizedRoute(places)
-  var directions = await getDirections(route)
+  var { routes } = await getOptimizedRoute(addresses)
 
-  var output = directions.routes.map(route => route.legs.map(leg => {
-    var summary = leg.summary.replace(', ', ' to ')
-    var steps = leg.steps.map(step => step.maneuver.instruction)
-
+  var legs = routes[0].legs.map(leg => {
     return {
-      summary,
-      steps
-    }
-  }))
-
-  process.stdout.write(JSON.stringify(output[0], null, 2))
-}
-
-function geocode (address) {
-  debug('address:', address)
-  address = encodeURIComponent(address)
-
-  var opts = {
-    method: 'GET',
-    url: 'https://maps.googleapis.com/maps/api/geocode/json?' +
-         `address=${address}&key=${constants.GOOGLE_KEY}`,
-    json: true
-  }
-
-  debug(opts.url)
-
-  return request(opts).then(res => {
-    var place = res.results[0]
-
-    if (!place) throw new Error('uh oh, no place for', address)
-    debug('place', place, 'res.results', res.results)
-    var { lng, lat } = place.geometry.location
-
-    return {
-      address: place.formatted_address,
-      coordinates: lng + ',' + lat
+      from: leg.start_address,
+      to: leg.end_address,
+      steps: leg.steps.map(step => step.html_instructions)
     }
   })
+
+  var pretty = html`
+    <div>
+      ${legs.map(leg => html`
+        <div>
+          <strong>From: </strong>${leg.from} <br/>
+          <strong>To: </strong>${leg.to}
+          <ul>${leg.steps.map(step => html`<li>${html(step)}</li>`)}</ul>
+        </div>`
+      )}
+    </div>`
+
+  process.stdout.write(pretty.toString())
 }
 
-function getOptimizedRoute (places) {
-  var coordinates = places.map(place => place.coordinates).join(';')
+function getOptimizedRoute (addresses) {
+  var origin = addresses[0]
+  var dest = addresses[addresses.length - 1]
+  var waypoints = encodeURIComponent(addresses.slice(1, -1).join('|'))
 
   var opts = {
     method: 'GET',
-    url: `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordinates}` +
-         `?access_token=${constants.MAPBOX_KEY}`,
+    url: `https://maps.googleapis.com/maps/api/directions/json` +
+         `?origin=${origin}&destination=${dest}&waypoints=optimize:true|${waypoints}&key=${constants.GOOGLE_KEY}`,
     json: true
   }
 
-  return request(opts)
-}
-
-function getDirections (route) {
-  var coordinates = route.waypoints.map(waypoint => waypoint.location.join(',')).join(';')
-
-  var opts = {
-    method: 'GET',
-    url: `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}` +
-         `?steps=true&access_token=${constants.MAPBOX_KEY}`,
-    json: true
-  }
-
-  debug(opts.url)
-
-  return request(opts)
+  return request(opts).then(res => {
+    return res
+  })
 }
